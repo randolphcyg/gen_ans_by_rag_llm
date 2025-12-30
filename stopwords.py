@@ -1,7 +1,12 @@
 import os
 import jieba
+import warnings
 import logging
 from typing import Set, List
+
+# 屏蔽 jieba 导致的 pkg_resources 废弃警告
+warnings.filterwarnings("ignore", category=UserWarning, module='jieba')
+warnings.filterwarnings("ignore", category=DeprecationWarning, module='pkg_resources')
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -16,7 +21,7 @@ class StopWordsManager:
         # 核心：添加 Zeek 专用保留词，防止被 jieba 切碎
         self.special_terms = ["zeek_init", "zeek_done", "client_cert", "ssl_history", "conn_id"]
         for term in self.special_terms:
-            jieba.add_word(term)
+            jieba.add_word(term, freq=100, tag=None)
 
     def load_stop_words(self) -> None:
         if os.path.exists(STOP_WORDS_FILE):
@@ -47,7 +52,7 @@ class StopWordsManager:
     def filter_stop_words(self, text: str, min_length: int = 2) -> List[str]:
         # 1. 预处理：保留下划线，这对 Zeek 术语至关重要
         text = text.replace("_", "SUB_PLACEHOLDER")
-        words = jieba.lcut(text)
+        words = jieba.cut(text)
 
         filtered_words = []
         for word in words:
