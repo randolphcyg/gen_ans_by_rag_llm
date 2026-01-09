@@ -99,13 +99,25 @@ class ZeekRAGService:
 
     @observe(name="RAG-检索阶段")
     def _retrieve(self, query: str):
-        # ... (此处代码与原 retrieve 相同，只需将 print 改为 logging 或删除) ...
-        # 为节省篇幅，假设此处逻辑与上一版一致
+        print(f"🔍 [Debug] 正在检索: {query}") # 打印正在做什么
         try:
-            resp = self.session.post(f"{OLLAMA_HOST}/api/embed", json={"model": EMBED_MODEL, "input": [query]}, timeout=30)
-            vec = resp.json().get("embeddings", [])
-            if not vec: return []
+            # 1. 请求 Embedding
+            embed_url = f"{OLLAMA_HOST}/api/embed"
+            resp = self.session.post(embed_url, json={"model": EMBED_MODEL, "input": [query]}, timeout=30)
 
+            # 检查状态码
+            if resp.status_code != 200:
+                print(f"❌ [Error] Embedding 请求失败: {resp.text}")
+                return []
+
+            vec = resp.json().get("embeddings", [])
+            if not vec:
+                print("❌ [Error] Embedding 返回为空 (模型可能未加载)")
+                return []
+
+            print(f"✅ [Debug] 向量生成成功，长度: {len(vec[0])}")
+
+            # 2. 请求 Milvus
             res = self.milvus_client.search(
                 collection_name=COLLECTION_TARGET,
                 data=vec,
@@ -122,8 +134,14 @@ class ZeekRAGService:
                         "score": hit["distance"],
                         "raw_content": hit["entity"].get(self.schema["text"], "")
                     })
+
+            print(f"✅ [Debug] Milvus 检索到 {len(v_hits)} 条数据")
             return v_hits
-        except Exception:
+
+        except Exception as e:
+            print(f"❌ [CRITICAL ERROR] 检索流程崩溃: {e}") # 打印具体错误
+            import traceback
+            traceback.print_exc() # 打印详细堆栈
             return []
 
     @observe(name="RAG-重排阶段")
