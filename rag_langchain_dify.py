@@ -1,28 +1,32 @@
 # -*- coding: utf-8 -*-
 import time
-from typing import List, Any, Tuple
-
 import requests
-from langchain_core.callbacks import CallbackManagerForRetrieverRun
-# LangChain Core
-from langchain_core.documents import Document
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.retrievers import BaseRetriever
-from langchain_core.runnables import RunnableParallel, RunnablePassthrough, RunnableLambda
-# LLM
-from langchain_ollama import ChatOllama
-# Observability
-from langfuse import Langfuse, get_client, observe
-from langfuse.langchain import CallbackHandler
+from typing import List, Dict, Any, Optional, Tuple
+
+from flask import Flask, request, jsonify
 from pydantic import Field
 
+# LangChain Core
+from langchain_core.documents import Document
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnableParallel, RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.callbacks import CallbackManagerForRetrieverRun
+
+# LLM
+from langchain_ollama import ChatOllama
+
+# Observability
+import langfuse
+from langfuse import Langfuse, get_client, observe
+from langfuse.langchain import CallbackHandler
+
+# --- 1. 配置区 ---
 DIFY_API_KEY = "dataset-MF0p7JRI8hUO5nHXRJ73szfi"
-DATASETS = {
-    "Parent-Child": "0804549e-ed61-4f22-9f94-16176bb0cede",
-    "General": "19191596-0e1f-492c-ab31-15e11501cec4"
-}
+DIFY_DATASET_ID = "0804549e-ed61-4f22-9f94-16176bb0cede"
 DIFY_BASE_URL = "http://127.0.0.1:5001/v1"
+COLLECTION_TARGET = "Vector_index_0804549e_ed61_4f22_9f94_16176bb0cede_Node"
 
 LANGFUSE_SECRET_KEY = "sk-lf-93542e4b-15ef-4a50-8719-0a12fbc42a8b"
 LANGFUSE_PUBLIC_KEY = "pk-lf-f7f639cf-2585-4578-9404-26dec6b91626"
@@ -33,11 +37,13 @@ RERANK_MODEL = "bge-reranker-v2-m3"
 LLM_MODEL = "qwen2.5-coder:3b"
 
 
+# --- 2. 自定义 Dify 检索器 (增强版) ---
 class DifyKnowledgeBaseRetriever(BaseRetriever):
     api_key: str = Field(..., description="Dify Dataset API Key")
     dataset_id: str = Field(..., description="Dify Knowledge Base ID")
     base_url: str = Field(default="http://localhost/v1", description="Dify API Base URL")
     top_k: int = Field(default=5, description="Number of docs to retrieve")
+
 
     def _get_relevant_documents(
             self, query: str, *, run_manager: CallbackManagerForRetrieverRun
@@ -49,7 +55,6 @@ class DifyKnowledgeBaseRetriever(BaseRetriever):
             "Content-Type": "application/json"
         }
 
-        # 强制使用混合检索
         payload = {
             "query": query,
             "retrieval_model": {
@@ -91,10 +96,10 @@ class DifyKnowledgeBaseRetriever(BaseRetriever):
             print(f"❌ [Dify API Error] {e}")
             return []
 
-
-class ZeekDifyTester:
+# --- 3. 主服务逻辑 ---
+class ZeekLangChainService:
     def __init__(self):
-        print("⏳ 初始化测试器 (Dify API & Langfuse)...")
+        print("⏳ Service initializing with Dify API...")
 
         Langfuse(
             secret_key=LANGFUSE_SECRET_KEY,
@@ -104,6 +109,14 @@ class ZeekDifyTester:
         )
 
         self.langfuse = get_client()
+        self.trace_handler = CallbackHandler()
+
+        self.retriever = DifyKnowledgeBaseRetriever(
+            api_key=DIFY_API_KEY,
+            dataset_id=DIFY_DATASET_ID,
+            base_url=DIFY_BASE_URL,
+            top_k=6
+        )
 
         self.llm = ChatOllama(
             base_url=OLLAMA_HOST,
@@ -121,7 +134,6 @@ class ZeekDifyTester:
     def _get_langfuse_prompt(self, prompt_name: str) -> Tuple[ChatPromptTemplate, Any]:
         lf_prompt = self.langfuse.get_prompt(prompt_name, label="latest")
         messages = lf_prompt.get_langchain_prompt()
-
         if isinstance(messages, list):
             lc_prompt = ChatPromptTemplate.from_messages(messages)
         elif isinstance(messages, str):
@@ -133,102 +145,96 @@ class ZeekDifyTester:
 
     def _format_docs(self, docs):
         if not docs: return "No relevant documents found."
-        return "\n\n".join(
-            [f"### Context (Score: {d.metadata.get('score', 0):.4f}):\n{d.page_content.strip()}" for d in docs])
+        return "\n\n".join([f"### Context (Score: {d.metadata.get('score', 0):.4f}):\n{d.page_content.strip()}" for d in docs])
 
-    @observe(name="test")
-    def run_comparison(self, query: str):
-        print(f"\n{'=' * 20} 🟢 测试问题: {query} {'=' * 20}")
+    @observe(name="Zeek-RAG-Flow")
+    def ask_with_refs(self, query: str) -> Dict[str, Any]:
+        if not query or len(query.strip()) < 2:
+            return {"query": query, "answer": "Enter a valid question", "references": [], "status": "error"}
 
         prompt_name = self._route_prompt(query)
         lc_prompt, lf_prompt_obj = self._get_langfuse_prompt(prompt_name)
 
-        for name, dataset_id in DATASETS.items():
-            print(f"\n🔍 Testing Index: [{name}]")
+        self.langfuse.update_current_trace(
+            tags=[prompt_name, "dify_hybrid", "ollama"],
+            user_id="ran9527",
+            metadata={
+                "prompt_name": prompt_name,
+                "prompt_version": str(lf_prompt_obj.version),
+                "embed_model": EMBED_MODEL,
+                "rerank_model": RERANK_MODEL,
+                "llm_model": LLM_MODEL,
+                "milvus_collection": COLLECTION_TARGET,
+            }
+        )
 
-            trace_handler = CallbackHandler()
+        rag_chain = (
+            RunnableParallel(
+                context=self.retriever.with_config(run_name="Dify_Retrieval"),
+                question=RunnablePassthrough()
+            )
+            .assign(
+                formatted_context=lambda x: self._format_docs(x["context"])
+            )
+            .assign(
+                answer=lambda x: (
+                        lc_prompt.partial(context=x["formatted_context"])
+                        | self.llm.with_config(run_name="Ollama_Generate")
+                        | StrOutputParser()
+                ).invoke({"question": x["question"]})
+            )
+        )
 
-            retriever = DifyKnowledgeBaseRetriever(
-                api_key=DIFY_API_KEY,
-                dataset_id=dataset_id,
-                base_url=DIFY_BASE_URL,
-                top_k=6
+        try:
+            res = rag_chain.invoke(
+                input=query,
+                config={"callbacks": [self.trace_handler]}
             )
 
             self.langfuse.update_current_trace(
-                name=f"Test-{name}",
-                tags=[name, prompt_name, "dify_hybrid", "comparison"],
+                output=res["answer"],
                 metadata={
-                    "prompt_name": prompt_name,
-                    "prompt_version": str(lf_prompt_obj.version),
-                    "embed_model": EMBED_MODEL,
-                    "rerank_model": RERANK_MODEL,
-                    "llm_model": LLM_MODEL,
-                    "milvus_collection": dataset_id,
-                },
-                input=query
-            )
-            # 3. 定义链
-            rag_chain = (
-                RunnableParallel(
-                    context=retriever.with_config(run_name=f"Retrieve_{name}"),
-                    question=RunnablePassthrough()
-                )
-                .assign(
-                    formatted_context=RunnableLambda(lambda x: self._format_docs(x["context"])).with_config(
-                        run_name="Format"),
-                )
-                .assign(
-                    answer=RunnableLambda(lambda x: (
-                            lc_prompt.partial(context=x["formatted_context"])
-                            | self.llm.with_config(run_name="Ollama_Generate")
-                            | StrOutputParser()
-                    ).invoke({"question": x["question"]})).with_config(run_name="LLM_Chain")
-                )
+                    "retrieved_docs_count": len(res["context"]),
+                    "top_doc_score": res["context"][0].metadata.get('score', 0) if res["context"] else 0
+                }
             )
 
-            try:
-                start_t = time.time()
-                res = rag_chain.invoke(
-                    input=query,
-                    config={"callbacks": [trace_handler]}  # 确保回调关联当前Trace
-                )
-                cost = time.time() - start_t
+            refs = []
+            for d in res["context"]:
+                meta = d.metadata or {}
+                refs.append({
+                    "score": round(meta.get("score", 0.0), 4),
+                    "relevance_score": round(meta.get("score", 0.0), 4),
+                    "content": d.page_content[:500].strip(),
+                    "doc_id": meta.get("doc_id", "unknown")
+                })
 
-                # 5. 打印对比结果
-                print(f"⏱️ 总耗时: {cost:.2f}s")
-                print(f"🎨 Prompt: {prompt_name} (v{lf_prompt_obj.version})")
-                print(f"\n🤖 回答:\n{res['answer'].strip()}")
+            return {
+                "query": query,
+                "answer": res["answer"].strip(),
+                "references": refs,
+                "used_prompt": f"{prompt_name} (v{lf_prompt_obj.version})", # 返回给前端版本号
+                "status": "success"
+            }
 
-                print(f"\n📚 引用片段 (Dify Top 3):")
-                for i, d in enumerate(res["context"][:3]):
-                    score = d.metadata.get('score', 0.0)
-                    # 只显示前100个字符预览，去除换行
-                    content_preview = d.page_content[:100].replace('\n', ' ')
-                    print(f"   [{i + 1}] Score: {score:.4f} | {content_preview}...")
-
-            except Exception as e:
-                print(f"❌ 错误: {e}")
-                self.langfuse.update_current_trace(
-                    metadata={"error": str(e)}
-                )
-
+        except Exception as e:
+            print(f"❌ Pipeline Error: {e}")
+            self.langfuse.update_current_trace(
+                metadata={"error": str(e)}
+            )
+            return {"status": "error", "answer": str(e), "references": [], "query": query}
 
 if __name__ == "__main__":
-    tester = ZeekDifyTester()
+    service = ZeekLangChainService()
+    app = Flask(__name__)
 
-    test_queries = [
-        "hi, what is zeek?",
-        # "Explain the meaning of the `history` field string 'ShADadFf' in `conn.log`.",
-        # "Write a script to handle `ssh_auth_successful` event. Do I need to load any module?",
-        # "Why is my `notice.log` empty even though I see attacks in `conn.log`?"
-    ]
+    @app.route('/chat', methods=['POST'])
+    def chat():
+        data = request.json or {}
+        query = data.get('query', '').strip()
+        start = time.time()
+        result = service.ask_with_refs(query)
+        result['cost_time'] = round(time.time() - start, 2)
+        return jsonify(result), 200 if result["status"] == "success" else 500
 
-    print(f"🚀 开始执行 {len(test_queries)} 个测试用例...")
-
-    for q in test_queries:
-        tester.run_comparison(q)
-        time.sleep(3)
-
-    print("\n✅ 所有测试完成，正在上传 Traces...")
-    tester.langfuse.flush()
+    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
