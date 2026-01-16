@@ -3,7 +3,7 @@ import json
 import time
 
 # API 地址
-API_URL = "http://localhost:5000/chat"
+API_URL = "http://localhost:15000/chat"
 
 # 🎯 核心测试集：涵盖细节、编程、排错、概念
 TEST_CASES = [

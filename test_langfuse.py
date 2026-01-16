@@ -1,4 +1,3 @@
-# 1. 先导入依赖
 from langfuse import Langfuse
 from langfuse import observe
 import os
@@ -9,8 +8,8 @@ os.environ["OTEL_EXPORTER_OTLP_MAX_RETRIES"] = "0"  # 禁用无限重试（重�
 os.environ["OTEL_SDK_DISABLED"] = "false"           # 开启追踪
 
 # 3. 初始化 Langfuse，你的密钥和地址完全正确，不用改
-LANGFUSE_SECRET_KEY = "sk-lf-93542e4b-15ef-4a50-8719-0a12fbc42a8b"
-LANGFUSE_PUBLIC_KEY = "pk-lf-f7f639cf-2585-4578-9404-26dec6b91626"
+LANGFUSE_SECRET_KEY = "sk-lf-15beef95-8342-4448-b6d7-eb8cf71897bb"
+LANGFUSE_PUBLIC_KEY = "pk-lf-c1be2f02-11b3-422d-95ed-8d43b6fb6e22"
 LANGFUSE_BASE_URL = "http://localhost:3100"
 
 langfuse = Langfuse(

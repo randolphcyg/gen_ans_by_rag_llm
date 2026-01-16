@@ -24,12 +24,12 @@ from langfuse.langchain import CallbackHandler
 
 # --- 1. 配置区 ---
 DIFY_API_KEY = "dataset-MF0p7JRI8hUO5nHXRJ73szfi"
-DIFY_DATASET_ID = "0804549e-ed61-4f22-9f94-16176bb0cede"
+DIFY_DATASET_ID = "ec367307-db47-4449-9624-6e8ae9d6c405"
 DIFY_BASE_URL = "http://127.0.0.1:5001/v1"
-COLLECTION_TARGET = "Vector_index_0804549e_ed61_4f22_9f94_16176bb0cede_Node"
+COLLECTION_TARGET = "Vector_index_ec367307_db47_4449_9624_6e8ae9d6c405_Node"
 
-LANGFUSE_SECRET_KEY = "sk-lf-93542e4b-15ef-4a50-8719-0a12fbc42a8b"
-LANGFUSE_PUBLIC_KEY = "pk-lf-f7f639cf-2585-4578-9404-26dec6b91626"
+LANGFUSE_SECRET_KEY = "sk-lf-15beef95-8342-4448-b6d7-eb8cf71897bb"
+LANGFUSE_PUBLIC_KEY = "pk-lf-c1be2f02-11b3-422d-95ed-8d43b6fb6e22"
 LANGFUSE_BASE_URL = "http://localhost:3100"
 OLLAMA_HOST = "http://localhost:11434"
 EMBED_MODEL = "bge-m3"
@@ -237,4 +237,4 @@ if __name__ == "__main__":
         result['cost_time'] = round(time.time() - start, 2)
         return jsonify(result), 200 if result["status"] == "success" else 500
 
-    app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)
+    app.run(host="0.0.0.0", port=15000, debug=False, threaded=True)

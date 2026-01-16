@@ -1,7 +1,7 @@
 from pymilvus import connections, Collection
 
 connections.connect(host="localhost", port="19530")
-collection_name = "Vector_index_0804549e_ed61_4f22_9f94_16176bb0cede_Node"
+collection_name = "Vector_index_ec367307_db47_4449_9624_6e8ae9d6c405_Node"
 
 
 if __name__ == '__main__':
